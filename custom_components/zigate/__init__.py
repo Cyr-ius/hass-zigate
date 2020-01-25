@@ -10,8 +10,8 @@ import os
 import datetime
 import zigate
 
-# from homeassistant import config_entries
-import homeassistant.helpers.config_validation as cv
+from homeassistant.config_entries import SOURCE_IMPORT
+from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.components.group import \
     ENTITY_ID_FORMAT as GROUP_ENTITY_ID_FORMAT
@@ -25,6 +25,7 @@ from homeassistant.const import (
 from .const import (
     DOMAIN,
     SCAN_INTERVAL,
+    PERSISTENT_FILE,
     DATA_ZIGATE_DEVICES,
     DATA_ZIGATE_ATTRS
 )
@@ -50,20 +51,34 @@ CONFIG_SCHEMA = vol.Schema({
     })
 }, extra=vol.ALLOW_EXTRA)
 
+async def async_setup(hass, config):
+    """Load configuration for Zigate component."""
 
-def setup(hass, config):
+    if not hass.config_entries.async_entries(DOMAIN) and DOMAIN in config:
+        zigate_config = config[DOMAIN]
+        _LOGGER.debug(zigate_config)
+        hass.async_create_task(
+            hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": SOURCE_IMPORT}, data=zigate_config
+            )
+        )
+
+    return True
+
+async def async_setup_entry(hass, config_entry):
     """Setup zigate platform."""
-
-    port = config[DOMAIN].get(CONF_PORT)
-    host = config[DOMAIN].get(CONF_HOST)
-    gpio = config[DOMAIN].get('gpio', False)
-    enable_led = config[DOMAIN].get('enable_led', True)
-    polling = config[DOMAIN].get('polling', True)
-    channel = config[DOMAIN].get('channel')
-    scan_interval = datetime.timedelta(seconds=config[DOMAIN].get(CONF_SCAN_INTERVAL, SCAN_INTERVAL))
-    admin_panel = config[DOMAIN].get('admin_panel', True)
-
-    persistent_file = os.path.join(hass.config.config_dir, 'zigate.json')
+    port = config_entry.data["port"]
+    host = config_entry.data["host"]
+    gpio = config_entry.data["gpio"]
+    enable_led = config_entry.data["enable_led"]
+    polling = config_entry.data["polling"]
+    channel = config_entry.data["channel"]
+    scan_interval = datetime.timedelta(
+        seconds=config[DOMAIN].get(CONF_SCAN_INTERVAL,config_entry.data["scan_interval"])
+    )
+    admin_panel = config_entry.data["admin_panel"]
+    
+    persistent_file = os.path.join(hass.config.config_dir, PERSISTENT_FILE)
 
     _LOGGER.debug('Port : %s', port)
     _LOGGER.debug('Host : %s', host)
@@ -75,7 +90,16 @@ def setup(hass, config):
     myzigate = zigate.connect(
         port=port, host=host, path=persistent_file, auto_start=False, gpio=gpio)
 
+    if myzigate.ieee is None:
+        return False
+        
     _LOGGER.debug('ZiGate object created %s', myzigate)
+    device_registry = await dr.async_get_registry(hass)
+    device_registry.async_get_or_create(
+        config_entry_id=config_entry.entry_id,
+        identifiers={(DOMAIN, hass.data[DOMAIN][myzigate.ieee])},
+        sw_version=myzigate.get_version_text(),
+    )
 
     hass.data[DOMAIN] = myzigate
     hass.data[DATA_ZIGATE_DEVICES] = {}
@@ -114,15 +138,14 @@ def setup(hass, config):
             require_admin=True,
         )
 
-#     hass.async_create_task(
-#         hass.config_entries.flow.async_init(
-#             DOMAIN, context={"source": config_entries.SOURCE_IMPORT}, data={}
-#         )
-#     )
-
     return True
 
+async def async_unload_entry(hass, config_entry):
+    """Unload a config entry."""
 
-# async def async_setup_entry(hass, entry):
-#     _LOGGER.warning('async_setup_entry not implemented yet for ZiGate')
-#     return False
+    for component in SUPPORTED_PLATFORMS:
+        hass.async_create_task(
+            hass.config_entries.async_forward_entry_unload(config_entry, component)
+        )
+
+    return True

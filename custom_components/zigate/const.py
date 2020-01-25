@@ -12,3 +12,5 @@ SUPPORTED_PLATFORMS = (
     'cover',
     'climate'
 )
+PERSISTENT_FILE = 'zigate.json'
+AVAILABLE_MODES = ['usb','wifi','gpio']
