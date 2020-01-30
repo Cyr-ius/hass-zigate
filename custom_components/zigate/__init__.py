@@ -12,7 +12,7 @@ import zigate
 
 from homeassistant.config_entries import SOURCE_IMPORT
 from homeassistant.helpers import config_validation as cv, device_registry as dr
-from homeassistant.helpers.entity_component import EntityComponent
+from homeassistant.helpers.entity_platform import EntityPlatform
 from homeassistant.components.group import \
     ENTITY_ID_FORMAT as GROUP_ENTITY_ID_FORMAT
 from homeassistant.const import (
@@ -22,12 +22,15 @@ from homeassistant.const import (
 )
 
 
-from .const import (
+from .core.const import (
     DOMAIN,
     SCAN_INTERVAL,
     PERSISTENT_FILE,
     DATA_ZIGATE_DEVICES,
-    DATA_ZIGATE_ATTRS
+    DATA_ZIGATE_ATTRS,
+    DATA_ZIGATE_CONFIG,
+    ZIGATE_ID,
+    SUPPORTED_PLATFORMS
 )
 from .core.admin_panel import ZiGateAdminPanel, ZiGateProxy
 from .core.dispatcher import ZigateDispatcher
@@ -35,6 +38,8 @@ from .core.services import ZigateServices
 from .core.entities import ZiGateComponentEntity
 
 _LOGGER = logging.getLogger(__name__)
+
+DEPENDENCIES = ['zigate']
 
 ENTITY_ID_ALL_ZIGATE = GROUP_ENTITY_ID_FORMAT.format('all_zigate')
 
@@ -51,33 +56,52 @@ CONFIG_SCHEMA = vol.Schema({
     })
 }, extra=vol.ALLOW_EXTRA)
 
+
 async def async_setup(hass, config):
     """Load configuration for Zigate component."""
 
-    if not hass.config_entries.async_entries(DOMAIN) and DOMAIN in config:
-        zigate_config = config[DOMAIN]
-        _LOGGER.debug(zigate_config)
+    hass.data[DATA_ZIGATE_DEVICES] = {}
+    hass.data[DATA_ZIGATE_ATTRS] = {}
+
+    if DOMAIN not in config:
+        return True
+
+    config = config[DOMAIN]
+    hass.data[DATA_ZIGATE_CONFIG] = config
+
+    if not hass.config_entries.async_entries(DOMAIN):
         hass.async_create_task(
             hass.config_entries.flow.async_init(
-                DOMAIN, context={"source": SOURCE_IMPORT}, data=zigate_config
+                DOMAIN, context={"source": SOURCE_IMPORT}, data=config
             )
         )
 
     return True
 
+
 async def async_setup_entry(hass, config_entry):
     """Setup zigate platform."""
-    port = config_entry.data["port"]
-    host = config_entry.data["host"]
-    gpio = config_entry.data["gpio"]
-    enable_led = config_entry.data["enable_led"]
-    polling = config_entry.data["polling"]
-    channel = config_entry.data["channel"]
+
+    # Merge config entry and yaml config
+    config = config_entry.data
+    options = config_entry.options
+    if DATA_ZIGATE_CONFIG in hass.data:
+        config = {**config, **options, **hass.data[DATA_ZIGATE_CONFIG]}
+
+    # Update hass.data with merged config so we can access it elsewhere
+    hass.data[DATA_ZIGATE_CONFIG] = config
+
+    port = config.get("port")
+    host = config.get("host")
+    gpio = config.get("gpio")
+    channel = config.get("channel")
+    enable_led = config.get("enable_led", True)
+    polling = config.get("polling", True)
+    admin_panel = config.get("admin_panel", True)
     scan_interval = datetime.timedelta(
-        seconds=config[DOMAIN].get(CONF_SCAN_INTERVAL,config_entry.data["scan_interval"])
+        seconds=config.get("scan_interval", SCAN_INTERVAL)
     )
-    admin_panel = config_entry.data["admin_panel"]
-    
+
     persistent_file = os.path.join(hass.config.config_dir, PERSISTENT_FILE)
 
     _LOGGER.debug('Port : %s', port)
@@ -88,30 +112,63 @@ async def async_setup_entry(hass, config_entry):
     _LOGGER.debug('Scan interval : %s', scan_interval)
 
     myzigate = zigate.connect(
-        port=port, host=host, path=persistent_file, auto_start=False, gpio=gpio)
+        port=port,
+        host=host,
+        path=persistent_file,
+        auto_start=False,
+        gpio=gpio
+    )
 
-    if myzigate.ieee is None:
-        return False
-        
     _LOGGER.debug('ZiGate object created %s', myzigate)
+    hass.data[DOMAIN] = myzigate
+    _LOGGER.debug(dir(hass.data[DOMAIN]))
+
+    _LOGGER.debug('Create platform')
+    platform = EntityPlatform(
+        hass=hass,
+        logger=_LOGGER,
+        domain=DOMAIN,
+        platform_name=DOMAIN,
+        platform=None,
+        scan_interval=scan_interval,
+        entity_namespace=None,
+    )
+    platform.config_entry = config_entry
+
+    _LOGGER.debug('Start Zigate')
+    myzigate.autoStart(channel)
+    myzigate.start_auto_save()
+    myzigate.set_led(enable_led)
+    version = myzigate.get_version_text()
+    if version < '3.1a':
+        hass.components.persistent_notification.create(
+            ('Your zigate firmware is outdated, '
+             'Please upgrade to 3.1a or later !'), title='ZiGate')
+    hass.data[ZIGATE_ID] = myzigate.ieee
+    myzigate.save_state()
+    myzigate.close()
+
+    _LOGGER.debug("Device Registry")
     device_registry = await dr.async_get_registry(hass)
     device_registry.async_get_or_create(
         config_entry_id=config_entry.entry_id,
-        identifiers={(DOMAIN, hass.data[DOMAIN][myzigate.ieee])},
-        sw_version=myzigate.get_version_text(),
+        identifiers={(DOMAIN, hass.data[ZIGATE_ID])},
+        name='Zigate Coordinator',
+        manufacturer='Zigate',
+        sw_version=version,
     )
 
-    hass.data[DOMAIN] = myzigate
-    hass.data[DATA_ZIGATE_DEVICES] = {}
-    hass.data[DATA_ZIGATE_ATTRS] = {}
+    _LOGGER.debug('Load dispatcher')
+    ZigateDispatcher(hass, config, platform)
 
-    component = EntityComponent(_LOGGER, DOMAIN, hass, scan_interval)
-    component.setup(config)
+    _LOGGER.debug('Register services')
+    services = ZigateServices(hass, config_entry, config, platform)
+    await services.async_register()
+
+    _LOGGER.debug('Register Component Entity')
     entity = ZiGateComponentEntity(myzigate)
     hass.data[DATA_ZIGATE_DEVICES]['zigate'] = entity
-    component.add_entities([entity])
-    ZigateDispatcher(hass, config, component)
-    ZigateServices(hass, config, myzigate, component)
+    await platform.async_add_entities([entity])
 
     if admin_panel:
         _LOGGER.debug('Start ZiGate Admin Panel on port 9998')
@@ -138,7 +195,10 @@ async def async_setup_entry(hass, config_entry):
             require_admin=True,
         )
 
+    await hass.services.async_call(DOMAIN, "start_zigate")
+
     return True
+
 
 async def async_unload_entry(hass, config_entry):
     """Unload a config entry."""
@@ -147,5 +207,7 @@ async def async_unload_entry(hass, config_entry):
         hass.async_create_task(
             hass.config_entries.async_forward_entry_unload(config_entry, component)
         )
+
+    await hass.services.async_call(DOMAIN, "stop_zigate")
 
     return True
