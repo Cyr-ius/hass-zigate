@@ -85,8 +85,7 @@ async def async_setup_entry(hass, config_entry):
     # Merge config entry and yaml config
     config = config_entry.data
     options = config_entry.options
-    if DATA_ZIGATE_CONFIG in hass.data:
-        config = {**config, **options, **hass.data[DATA_ZIGATE_CONFIG]}
+    config = {**config, **options}
 
     # Update hass.data with merged config so we can access it elsewhere
     hass.data[DATA_ZIGATE_CONFIG] = config
@@ -109,6 +108,7 @@ async def async_setup_entry(hass, config_entry):
     _LOGGER.debug('Led : %s', enable_led)
     _LOGGER.debug('Channel : %s', channel)
     _LOGGER.debug('Scan interval : %s', scan_interval)
+    _LOGGER.debug('Admin panel : %s', admin_panel)
 
     myzigate = zigate.connect(
         port=port,
@@ -118,19 +118,20 @@ async def async_setup_entry(hass, config_entry):
         gpio=gpio
     )
     hass.data[DOMAIN] = myzigate
-
-    _LOGGER.debug('ZiGate object created %s', myzigate)
-    myzigate.autoStart(channel)
-    myzigate.start_auto_save()
-    myzigate.set_led(enable_led)
-    version = myzigate.get_version_text()
-    if version < '3.1a':
-        hass.components.persistent_notification.create(
-            ('Your zigate firmware is outdated, '
-             'Please upgrade to 3.1a or later !'), title='ZiGate')
-    hass.data[ZIGATE_ID] = myzigate.ieee
-    myzigate.save_state()
-    myzigate.close()
+    try:
+        myzigate.autoStart(channel)
+        myzigate.start_auto_save()
+        myzigate.set_led(enable_led)
+        version = myzigate.get_version_text()
+        if version < '3.1a':
+            hass.components.persistent_notification.create(
+                ('Your zigate firmware is outdated, '
+                 'Please upgrade to 3.1a or later !'), title='ZiGate')
+        hass.data[ZIGATE_ID] = myzigate.ieee
+        myzigate.save_state()
+        myzigate.close()
+    except:
+        return False
 
     device_registry = await dr.async_get_registry(hass)
     device_registry.async_get_or_create(
