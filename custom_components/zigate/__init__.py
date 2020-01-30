@@ -12,7 +12,7 @@ import zigate
 
 from homeassistant.config_entries import SOURCE_IMPORT
 from homeassistant.helpers import config_validation as cv, device_registry as dr
-from homeassistant.helpers.entity_platform import EntityPlatform
+from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.components.group import \
     ENTITY_ID_FORMAT as GROUP_ENTITY_ID_FORMAT
 from homeassistant.const import (
@@ -96,7 +96,6 @@ async def async_setup_entry(hass, config_entry):
     gpio = config.get("gpio")
     channel = config.get("channel")
     enable_led = config.get("enable_led", True)
-    polling = config.get("polling", True)
     admin_panel = config.get("admin_panel", True)
     scan_interval = datetime.timedelta(
         seconds=config.get("scan_interval", SCAN_INTERVAL)
@@ -118,24 +117,9 @@ async def async_setup_entry(hass, config_entry):
         auto_start=False,
         gpio=gpio
     )
+    hass.data[DOMAIN] = myzigate
 
     _LOGGER.debug('ZiGate object created %s', myzigate)
-    hass.data[DOMAIN] = myzigate
-    _LOGGER.debug(dir(hass.data[DOMAIN]))
-
-    _LOGGER.debug('Create platform')
-    platform = EntityPlatform(
-        hass=hass,
-        logger=_LOGGER,
-        domain=DOMAIN,
-        platform_name=DOMAIN,
-        platform=None,
-        scan_interval=scan_interval,
-        entity_namespace=None,
-    )
-    platform.config_entry = config_entry
-
-    _LOGGER.debug('Start Zigate')
     myzigate.autoStart(channel)
     myzigate.start_auto_save()
     myzigate.set_led(enable_led)
@@ -148,7 +132,6 @@ async def async_setup_entry(hass, config_entry):
     myzigate.save_state()
     myzigate.close()
 
-    _LOGGER.debug("Device Registry")
     device_registry = await dr.async_get_registry(hass)
     device_registry.async_get_or_create(
         config_entry_id=config_entry.entry_id,
@@ -158,17 +141,13 @@ async def async_setup_entry(hass, config_entry):
         sw_version=version,
     )
 
-    _LOGGER.debug('Load dispatcher')
-    ZigateDispatcher(hass, config, platform)
-
-    _LOGGER.debug('Register services')
-    services = ZigateServices(hass, config_entry, config, platform)
+    component = EntityComponent(_LOGGER, DOMAIN, hass)
+    ZigateDispatcher(hass, config, component)
+    services = ZigateServices(hass, config_entry, config, component)
     await services.async_register()
-
-    _LOGGER.debug('Register Component Entity')
     entity = ZiGateComponentEntity(myzigate)
-    hass.data[DATA_ZIGATE_DEVICES]['zigate'] = entity
-    await platform.async_add_entities([entity])
+    hass.data[DATA_ZIGATE_DEVICES][DOMAIN] = entity
+    await component.async_add_entities([entity])
 
     if admin_panel:
         _LOGGER.debug('Start ZiGate Admin Panel on port 9998')
