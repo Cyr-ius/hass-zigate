@@ -12,7 +12,7 @@ import zigate
 
 from homeassistant.config_entries import SOURCE_IMPORT
 from homeassistant.helpers import config_validation as cv, device_registry as dr
-from homeassistant.helpers.entity_component import EntityComponent
+from homeassistant.helpers.entity_platform import EntityPlatform
 from homeassistant.components.group import \
     ENTITY_ID_FORMAT as GROUP_ENTITY_ID_FORMAT
 from homeassistant.const import (
@@ -142,13 +142,23 @@ async def async_setup_entry(hass, config_entry):
         sw_version=version,
     )
 
-    component = EntityComponent(_LOGGER, DOMAIN, hass)
-    ZigateDispatcher(hass, config, component)
-    services = ZigateServices(hass, config_entry, config, component)
+    platform = EntityPlatform(
+        hass=hass,
+        logger=_LOGGER,
+        domain=DOMAIN,
+        platform_name=DOMAIN,
+        platform=None,
+        scan_interval=scan_interval,
+        entity_namespace=None,
+    )
+    platform.config_entry = config_entry
+
+    ZigateDispatcher(hass, config, platform)
+    services = ZigateServices(hass, config_entry, config, platform)
     await services.async_register()
     entity = ZiGateComponentEntity(myzigate)
     hass.data[DATA_ZIGATE_DEVICES][DOMAIN] = entity
-    await component.async_add_entities([entity])
+    await platform.async_add_entities([entity])
 
     if admin_panel:
         _LOGGER.debug('Start ZiGate Admin Panel on port 9998')
