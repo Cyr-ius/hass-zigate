@@ -44,35 +44,6 @@ async def async_setup_entry(hass, config, async_add_entities):
     )
 
 
-async def async_setup_entry(hass, config, async_add_entities):
-    """Set up the ZiGate sensors."""
-
-    myzigate = hass.data[DOMAIN]
-
-    def sync_attributes():
-        devs = []
-        for device in myzigate.devices:
-            ieee = device.ieee or device.addr  # compatibility
-            actions = device.available_actions()
-            if not any(actions.values()):
-                continue
-            for endpoint, action_type in actions.items():
-                if [zigate.ACTIONS_ONOFF] == action_type:
-                    key = '{}-{}-{}'.format(ieee, 'switch', endpoint)
-                    if key in hass.data[DATA_ZIGATE_ATTRS]:
-                        continue
-                    _LOGGER.debug(F"Creating switch for device {device} {endpoint}")
-                    entity = ZiGateSwitch(hass, device, endpoint)
-                    devs.append(entity)
-                    hass.data[DATA_ZIGATE_ATTRS][key] = entity
-
-        async_add_entities(devs)
-    sync_attributes()
-    zigate.dispatcher.connect(
-        sync_attributes, zigate.ZIGATE_ATTRIBUTE_ADDED, weak=False
-    )
-
-
 def setup_platform(hass, config, add_devices, discovery_info=None):
     """Set up the ZiGate sensors."""
     if discovery_info is None:
