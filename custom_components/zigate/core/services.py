@@ -372,7 +372,7 @@ class ZigateServices:
             await self.device_added(device=device)
 
         for component in SUPPORTED_PLATFORMS:
-            _LOGGER.debug(f'Load sensors {}'.format(component))
+            _LOGGER.debug('Load sensors {}'.format(component))
             self.hass.async_create_task(
                 self.hass.config_entries.async_forward_entry_setup(self.config_entry, component)
             )
