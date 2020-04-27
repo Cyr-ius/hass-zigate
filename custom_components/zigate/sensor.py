@@ -13,6 +13,7 @@ from homeassistant.const import (DEVICE_CLASS_HUMIDITY,
                                  DEVICE_CLASS_TEMPERATURE,
                                  DEVICE_CLASS_ILLUMINANCE,
                                  DEVICE_CLASS_PRESSURE,
+                                 DEVICE_CLASS_BATTERY,
                                  STATE_UNAVAILABLE)
 from homeassistant.helpers.entity import Entity
 
@@ -87,6 +88,8 @@ class ZiGateSensor(Entity):
             self._device_class = DEVICE_CLASS_ILLUMINANCE
         elif 'pressure' in name:
             self._device_class = DEVICE_CLASS_PRESSURE
+        elif 'pressure' in name:
+            self._device_class = DEVICE_CLASS_BATTERY
 
     def _handle_event(self, call):
         if (
