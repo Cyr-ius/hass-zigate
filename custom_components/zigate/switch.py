@@ -8,7 +8,7 @@ import logging
 import zigate
 
 from homeassistant.exceptions import PlatformNotReady
-from homeassistant.components.switch import SwitchDevice, ENTITY_ID_FORMAT
+from homeassistant.components.switch import SwitchEntity, ENTITY_ID_FORMAT
 
 from .core.const import DATA_ZIGATE_ATTRS, DOMAIN as DOMAIN
 
@@ -44,7 +44,7 @@ async def async_setup_entry(hass, config, async_add_entities):
     )
 
 
-class ZiGateSwitch(SwitchDevice):
+class ZiGateSwitch(SwitchEntity):
     """Representation of a ZiGate switch."""
 
     def __init__(self, hass, device, endpoint):
